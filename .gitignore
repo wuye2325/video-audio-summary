@@ -1,0 +1,8 @@
+venv/
+__pycache__/
+*.pyc
+.DS_Store
+*_逐字稿.md
+*_结构化总结.md
+.env
+.vscode/

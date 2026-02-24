@@ -173,6 +173,9 @@ export QWEN_ASR_DTYPE=float16  # 或 bfloat16/float32
 # 指定本地模型路径（优先级最高）
 export QWEN_ASR_MODEL_PATH=/path/to/local/model
 
+# 调整每块处理时长（秒），默认 60 秒/块，值越小进度更新越频繁
+export QWEN_ASR_CHUNK_SECONDS=30
+
 python scripts/extract_transcript.py "video.mp4"
 ```
 
@@ -251,7 +254,10 @@ python scripts/extract_transcript.py "video.mp4"
 - 输入：视频/音频文件路径
 - 输出：Markdown 格式的逐字稿文件
 - 依赖：qwen-asr（自动安装 torch, torchaudio 等）
-- 特性：自动检测硬件配置并选择最优模型和设备
+- 特性：
+  - 自动检测硬件配置并选择最优模型和设备
+  - **实时进度显示**：将音频切分为固定时长的块（默认 60s）逐块转录，每块完成后显示进度条、转录速度和预计剩余时间
+  - 支持通过 `QWEN_ASR_CHUNK_SECONDS` 环境变量调整块大小
 
 **detect_hardware.py** - 硬件检测模块
 - 功能：自动检测 CPU、GPU、内存等硬件信息
@@ -316,6 +322,43 @@ PIP_MIRROR=https://mirrors.cloud.tencent.com/pypi/simple  # 腾讯云
 ```
 
 > **关键经验**：先单独安装 `torch torchaudio`（大包），再安装 `qwen-asr`（小包），比一次性安装超时风险更低。
+
+**Q: 加载模型时出现 SSL 证书错误（certificate verify failed / self-signed certificate）怎么办？**
+A: 这是企业/学校网络代理（如深信服、Zscaler）用自签名证书拦截 HTTPS 流量导致的，Python certifi 不信任该证书。
+
+```bash
+# 方案：将 macOS Keychain 系统证书合并到 Python certifi（一次性操作）
+CERTIFI=$(python3 -c "import certifi; print(certifi.where())")
+cp "$CERTIFI" "${CERTIFI}.bak"  # 先备份
+security export -t certs -f pemseq -k /Library/Keychains/System.keychain >> "$CERTIFI" 2>/dev/null
+security export -t certs -f pemseq -k ~/Library/Keychains/login.keychain-db >> "$CERTIFI" 2>/dev/null
+echo "已合并证书数: $(grep -c 'BEGIN CERTIFICATE' $CERTIFI)"
+```
+
+> **已集成到 `check_environment.sh` 步骤 7**，会自动检测并修复。修复后 Python 的所有网络请求（requests/urllib3）均自动信任代理证书。
+
+**Q: 如何下载 Qwen3-ASR-1.7B 模型？（国内网络推荐方案）**
+A: 直接访问 HuggingFace 或 ModelScope 可能遇到 SSL 错误或超时。经验证的最快方案：
+
+```bash
+# 使用 hf-mirror.com 镜像 + huggingface_hub Python API
+source ~/qwen3-asr-env/bin/activate
+python3 -c "
+import os
+os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'
+from huggingface_hub import snapshot_download
+snapshot_download('Qwen/Qwen3-ASR-1.7B', local_dir=os.path.expanduser('~/Qwen3-ASR-1.7B'))
+print('下载完成')
+"
+# 下载完成后设置环境变量，脚本优先使用本地模型
+export QWEN_ASR_MODEL_PATH=~/Qwen3-ASR-1.7B
+```
+
+> ⚠️ **为什么不用 `modelscope` CLI？** `modelscope` CLI 在 Python 3.12 下存在 `No module named 'pkg_resources'` 兼容问题（Python 3.12 移除了该内置模块），`setuptools` 修复无效。直接用 `huggingface_hub` API 更可靠，且同样走国内 hf-mirror.com 镜像。
+>
+> 已集成到 `check_environment.sh` 步骤 8，**会自动下载模型**。
+
+
 
 **Q: 处理速度还是很慢怎么办？**
 A:

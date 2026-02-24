@@ -1,2 +1,7 @@
-faster-whisper
-pathlib
+# Qwen3-ASR 核心依赖
+modelscope>=1.0.0
+torch>=2.0.0
+torchaudio>=2.0.0
+soundfile
+pyyaml
+psutil

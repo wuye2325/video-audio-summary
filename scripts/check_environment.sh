@@ -1,18 +1,9 @@
 #!/bin/bash
-# 检查视频/音频处理环境
+# 检查视频/音频处理环境（Qwen3-ASR）
 
 echo "================================"
 echo "视频/音频处理环境检查"
 echo "================================"
-echo ""
-
-# 检查并设置 Hugging Face 镜像
-echo "提示: 首次运行需要下载 Whisper 模型（约 1.5GB）"
-echo "建议使用国内镜像加速下载："
-echo ""
-echo "  export HF_ENDPOINT=https://hf-mirror.com"
-echo ""
-echo "模型将缓存到: ~/.cache/huggingface/hub/"
 echo ""
 
 # 1. 检查 Python
@@ -50,7 +41,7 @@ fi
 # 4. 检查虚拟环境
 echo ""
 echo "4. 检查虚拟环境..."
-VENV_PATH="$HOME/Downloads/whisper-env"
+VENV_PATH="$HOME/Downloads/qwen-asr-env"
 if [ -d "$VENV_PATH" ]; then
     echo "   ✓ 虚拟环境已存在: $VENV_PATH"
 else
@@ -64,20 +55,58 @@ else
     fi
 fi
 
-# 5. 检查 faster-whisper
+# 5. 检查/安装依赖
 echo ""
-echo "5. 检查 faster-whisper..."
+echo "5. 检查依赖包..."
 source "$VENV_PATH/bin/activate"
-if pip show faster-whisper &> /dev/null; then
-    VERSION=$(pip show faster-whisper | grep Version | cut -d' ' -f2)
-    echo "   ✓ faster-whisper 已安装 (版本: $VERSION)"
+
+# 检查 modelscope
+echo ""
+echo "   检查 modelscope..."
+if pip show modelscope &> /dev/null; then
+    VERSION=$(pip show modelscope | grep Version | cut -d' ' -f2)
+    echo "   ✓ modelscope 已安装 (版本: $VERSION)"
 else
-    echo "   ○ faster-whisper 未安装，正在安装..."
-    pip install -i https://pypi.tuna.tsinghua.edu.cn/simple faster-whisper
+    echo "   ○ modelscope 未安装，正在安装..."
+    pip install -i https://pypi.tuna.tsinghua.edu.cn/simple modelscope
     if [ $? -eq 0 ]; then
-        echo "   ✓ faster-whisper 安装成功"
+        echo "   ✓ modelscope 安装成功"
     else
-        echo "   ✗ faster-whisper 安装失败"
+        echo "   ✗ modelscope 安装失败"
+        exit 1
+    fi
+fi
+
+# 检查 torch
+echo ""
+echo "   检查 torch..."
+if pip show torch &> /dev/null; then
+    VERSION=$(pip show torch | grep Version | cut -d' ' -f2)
+    echo "   ✓ torch 已安装 (版本: $VERSION)"
+else
+    echo "   ○ torch 未安装，正在安装..."
+    pip install -i https://pypi.tuna.tsinghua.edu.cn/simple torch torchaudio
+    if [ $? -eq 0 ]; then
+        echo "   ✓ torch 安装成功"
+    else
+        echo "   ✗ torch 安装失败"
+        exit 1
+    fi
+fi
+
+# 检查 soundfile
+echo ""
+echo "   检查 soundfile..."
+if pip show soundfile &> /dev/null; then
+    VERSION=$(pip show soundfile | grep Version | cut -d' ' -f2)
+    echo "   ✓ soundfile 已安装 (版本: $VERSION)"
+else
+    echo "   ○ soundfile 未安装，正在安装..."
+    pip install -i https://pypi.tuna.tsinghua.edu.cn/simple soundfile
+    if [ $? -eq 0 ]; then
+        echo "   ✓ soundfile 安装成功"
+    else
+        echo "   ✗ soundfile 安装失败"
         exit 1
     fi
 fi
@@ -89,3 +118,7 @@ echo "================================"
 echo ""
 echo "虚拟环境路径: $VENV_PATH"
 echo "激活命令: source $VENV_PATH/bin/activate"
+echo ""
+echo "提示: 首次运行时需要下载 Qwen3-ASR 模型（约 1.7B 模型约 3.5GB）"
+echo "模型将缓存到: ~/.cache/modelscope/hub/"
+echo ""

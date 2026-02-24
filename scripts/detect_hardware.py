@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-硬件检测模块 - 自动检测电脑配置并推荐最优 Whisper 配置
+硬件检测模块 - 自动检测电脑配置并推荐最优 Qwen3-ASR 配置
 支持 Windows、macOS 和 Linux
 """
 
@@ -385,6 +385,112 @@ class HardwareDetector:
 
         return config
 
+    def recommend_qwen_asr_config(self, hardware_info: Dict = None) -> Dict:
+        """
+        根据硬件信息推荐最优 Qwen3-ASR 配置
+
+        Args:
+            hardware_info: 硬件信息字典，如果为 None 则自动检测
+
+        Returns:
+            推荐配置字典
+        """
+        if hardware_info is None:
+            hardware_info = self.detect_all()
+
+        config = {
+            "model": "Qwen/Qwen3-ASR-1.7B",
+            "device": "cpu",
+            "reason": "",
+            "estimated_speedup": "1x (基准)",
+        }
+
+        # 检测 NVIDIA GPU（最优方案）
+        if hardware_info["has_nvidia_gpu"]:
+            config.update({
+                "model": "Qwen/Qwen3-ASR-1.7B",
+                "device": "cuda",
+                "reason": f"检测到 NVIDIA GPU: {hardware_info['gpu'][0]}",
+                "estimated_speedup": "10-20x (相比 CPU)",
+            })
+            return config
+
+        # 检测 Apple Silicon（M1/M2/M3/M5）
+        if hardware_info["has_apple_silicon"]:
+            # macOS 上优先尝试 MPS，回退到 CPU
+            # 检查是否支持 MPS
+            try:
+                import torch
+                if torch.backends.mps.is_available():
+                    config.update({
+                        "model": "Qwen/Qwen3-ASR-1.7B",
+                        "device": "mps",
+                        "reason": f"检测到 Apple Silicon: {hardware_info['processor']}, 使用 MPS 加速",
+                        "estimated_speedup": "3-5x (相比 CPU)",
+                    })
+                else:
+                    config.update({
+                        "model": "Qwen/Qwen3-ASR-1.7B",
+                        "device": "cpu",
+                        "reason": f"检测到 Apple Silicon: {hardware_info['processor']}, MPS 不可用，使用 CPU",
+                        "estimated_speedup": "1.5-2x (相比低配 CPU)",
+                    })
+            except ImportError:
+                config.update({
+                    "model": "Qwen/Qwen3-ASR-1.7B",
+                    "device": "cpu",
+                    "reason": f"检测到 Apple Silicon: {hardware_info['processor']}, 使用 CPU",
+                    "estimated_speedup": "1.5-2x (相比低配 CPU)",
+                })
+            return config
+
+        # 检测 AMD GPU（Linux ROCm 支持）
+        if hardware_info["has_amd_gpu"] and hardware_info["system"] == "Linux":
+            # AMD GPU 在 Linux 上可能支持 ROCm
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    config.update({
+                        "model": "Qwen/Qwen3-ASR-1.7B",
+                        "device": "cuda",  # ROCm 使用 CUDA 接口
+                        "reason": f"检测到 AMD GPU (ROCm): {hardware_info['gpu'][0]}",
+                        "estimated_speedup": "5-10x (相比 CPU)",
+                    })
+                    return config
+            except ImportError:
+                pass
+
+        # CPU 优化方案
+        memory_gb = hardware_info.get("memory_gb", 8)
+        cpu_cores = hardware_info.get("cpu_cores", 4)
+
+        if memory_gb >= 16 and cpu_cores >= 8:
+            # 高配 CPU
+            config.update({
+                "model": "Qwen/Qwen3-ASR-1.7B",
+                "device": "cpu",
+                "reason": f"高配 CPU ({cpu_cores} 核, {memory_gb}GB RAM), 使用 1.7B 模型",
+                "estimated_speedup": "1.5-2x (相比低配 CPU)",
+            })
+        elif memory_gb >= 8:
+            # 中配 CPU
+            config.update({
+                "model": "Qwen/Qwen3-ASR-1.7B",
+                "device": "cpu",
+                "reason": f"标准配置 CPU ({cpu_cores} 核, {memory_gb}GB RAM), 使用 1.7B 模型",
+                "estimated_speedup": "1.5x (相比低配 CPU)",
+            })
+        else:
+            # 低配 CPU - 使用 0.6B 模型
+            config.update({
+                "model": "Qwen/Qwen3-ASR-0.6B",
+                "device": "cpu",
+                "reason": f"低配 CPU，使用 0.6B 模型确保稳定性",
+                "estimated_speedup": "2-3x (相比 1.7B 模型)",
+            })
+
+        return config
+
     def print_hardware_info(self, hardware_info: Dict = None):
         """打印硬件信息"""
         if hardware_info is None:
@@ -427,7 +533,7 @@ def main():
     detector.print_hardware_info(hardware_info)
 
     # 推荐配置
-    config = detector.recommend_whisper_config(hardware_info)
+    config = detector.recommend_qwen_asr_config(hardware_info)
     detector.print_recommended_config(config)
 
     # 打印 Python 代码示例
@@ -435,21 +541,22 @@ def main():
     print("使用推荐配置的代码示例:")
     print("=" * 60)
     print(f"""
-from faster_whisper import WhisperModel
+from modelscope.pipelines import pipeline
+from modelscope.utils.constant import Tasks
 
-model = WhisperModel(
-    "{config['model_size']}",
-    device="{config['device']}",
-    compute_type="{config['compute_type']}"
+# 创建推理 pipeline
+asr_pipeline = pipeline(
+    task=Tasks.auto_speech_recognition,
+    model="{config['model']}",
+    device="{config['device']}"
 )
 
-segments, info = model.transcribe(
-    "your_audio.mp4",
-    language="zh",
-    batch_size={config['batch_size']},
-    word_timestamps=True,
-    vad_filter=True
-)
+# 执行识别
+result = asr_pipeline("your_audio.mp4")
+
+# 获取结果
+text = result.get("text", "")
+timestamps = result.get("timestamps", [])
 """)
 
 

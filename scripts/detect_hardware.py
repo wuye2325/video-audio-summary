@@ -393,7 +393,7 @@ class HardwareDetector:
             hardware_info: 硬件信息字典，如果为 None 则自动检测
 
         Returns:
-            推荐配置字典
+            推荐配置字典，包含 model, device, dtype, reason, estimated_speedup
         """
         if hardware_info is None:
             hardware_info = self.detect_all()
@@ -401,6 +401,7 @@ class HardwareDetector:
         config = {
             "model": "Qwen/Qwen3-ASR-1.7B",
             "device": "cpu",
+            "dtype": "float32",
             "reason": "",
             "estimated_speedup": "1x (基准)",
         }
@@ -410,6 +411,7 @@ class HardwareDetector:
             config.update({
                 "model": "Qwen/Qwen3-ASR-1.7B",
                 "device": "cuda",
+                "dtype": "bfloat16",  # 官方推荐 bfloat16，模型权重格式为 BF16
                 "reason": f"检测到 NVIDIA GPU: {hardware_info['gpu'][0]}",
                 "estimated_speedup": "10-20x (相比 CPU)",
             })
@@ -425,6 +427,7 @@ class HardwareDetector:
                     config.update({
                         "model": "Qwen/Qwen3-ASR-1.7B",
                         "device": "mps",
+                        "dtype": "bfloat16",  # 官方推荐 bfloat16（M1+ 均支持 bfloat16）
                         "reason": f"检测到 Apple Silicon: {hardware_info['processor']}, 使用 MPS 加速",
                         "estimated_speedup": "3-5x (相比 CPU)",
                     })
@@ -432,6 +435,7 @@ class HardwareDetector:
                     config.update({
                         "model": "Qwen/Qwen3-ASR-1.7B",
                         "device": "cpu",
+                        "dtype": "float32",
                         "reason": f"检测到 Apple Silicon: {hardware_info['processor']}, MPS 不可用，使用 CPU",
                         "estimated_speedup": "1.5-2x (相比低配 CPU)",
                     })
@@ -439,6 +443,7 @@ class HardwareDetector:
                 config.update({
                     "model": "Qwen/Qwen3-ASR-1.7B",
                     "device": "cpu",
+                    "dtype": "float32",
                     "reason": f"检测到 Apple Silicon: {hardware_info['processor']}, 使用 CPU",
                     "estimated_speedup": "1.5-2x (相比低配 CPU)",
                 })
@@ -453,6 +458,7 @@ class HardwareDetector:
                     config.update({
                         "model": "Qwen/Qwen3-ASR-1.7B",
                         "device": "cuda",  # ROCm 使用 CUDA 接口
+                        "dtype": "bfloat16",  # 官方推荐 bfloat16
                         "reason": f"检测到 AMD GPU (ROCm): {hardware_info['gpu'][0]}",
                         "estimated_speedup": "5-10x (相比 CPU)",
                     })
@@ -469,6 +475,7 @@ class HardwareDetector:
             config.update({
                 "model": "Qwen/Qwen3-ASR-1.7B",
                 "device": "cpu",
+                "dtype": "float32",
                 "reason": f"高配 CPU ({cpu_cores} 核, {memory_gb}GB RAM), 使用 1.7B 模型",
                 "estimated_speedup": "1.5-2x (相比低配 CPU)",
             })
@@ -477,6 +484,7 @@ class HardwareDetector:
             config.update({
                 "model": "Qwen/Qwen3-ASR-1.7B",
                 "device": "cpu",
+                "dtype": "float32",
                 "reason": f"标准配置 CPU ({cpu_cores} 核, {memory_gb}GB RAM), 使用 1.7B 模型",
                 "estimated_speedup": "1.5x (相比低配 CPU)",
             })
@@ -485,6 +493,7 @@ class HardwareDetector:
             config.update({
                 "model": "Qwen/Qwen3-ASR-0.6B",
                 "device": "cpu",
+                "dtype": "float32",
                 "reason": f"低配 CPU，使用 0.6B 模型确保稳定性",
                 "estimated_speedup": "2-3x (相比 1.7B 模型)",
             })
@@ -515,10 +524,15 @@ class HardwareDetector:
         print("\n" + "=" * 60)
         print("推荐配置")
         print("=" * 60)
-        print(f"模型: {config['model_size']}")
-        print(f"设备: {config['device']}")
-        print(f"计算类型: {config['compute_type']}")
-        print(f"批处理大小: {config['batch_size']}")
+        if "model_size" in config:  # Whisper 配置
+            print(f"模型: {config['model_size']}")
+            print(f"设备: {config['device']}")
+            print(f"计算类型: {config['compute_type']}")
+            print(f"批处理大小: {config['batch_size']}")
+        else:  # Qwen3-ASR 配置
+            print(f"模型: {config['model']}")
+            print(f"设备: {config['device']}")
+            print(f"数据类型: {config.get('dtype', 'float32')}")
         print(f"原因: {config['reason']}")
         print(f"预期加速: {config['estimated_speedup']}")
         print("=" * 60 + "\n")
@@ -541,22 +555,27 @@ def main():
     print("使用推荐配置的代码示例:")
     print("=" * 60)
     print(f"""
-from modelscope.pipelines import pipeline
-from modelscope.utils.constant import Tasks
+import torch
+from qwen_asr import Qwen3ASRModel
 
-# 创建推理 pipeline
-asr_pipeline = pipeline(
-    task=Tasks.auto_speech_recognition,
-    model="{config['model']}",
-    device="{config['device']}"
+# 创建模型
+asr_model = Qwen3ASRModel.from_pretrained(
+    "{config['model']}",
+    dtype=torch.{config.get('dtype', 'float32')},
+    device_map="{config['device']}" if "{config['device']}" != "cpu" else None,
+    max_inference_batch_size=8,
+    max_new_tokens=256,
 )
 
 # 执行识别
-result = asr_pipeline("your_audio.mp4")
+results = asr_model.transcribe(
+    audio="your_audio.mp4",
+    language=None,  # 自动检测语言
+)
 
 # 获取结果
-text = result.get("text", "")
-timestamps = result.get("timestamps", [])
+print(f"识别语言: {{results[0].language}}")
+print(f"识别文本: {{results[0].text}}")
 """)
 
 

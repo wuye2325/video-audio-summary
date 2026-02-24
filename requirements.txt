@@ -1,5 +1,7 @@
-# Qwen3-ASR 官方包（自动安装所需依赖）
+# Qwen3-ASR 官方包（安装命令：pip install -U qwen-asr）
+# 会自动安装所需依赖：torch, torchaudio, transformers, modelscope 等
 qwen-asr
 
-# 可选：GPU 加速
-# flash-attn  # NVIDIA GPU 用户可安装以加速推理
+# 可选：NVIDIA GPU 加速（需要 CUDA 环境）
+# 安装命令：pip install -U flash-attn --no-build-isolation
+# flash-attn

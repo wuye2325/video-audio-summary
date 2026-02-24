@@ -28,8 +28,11 @@ cd video-audio-summary
 python3 -m venv venv
 source venv/bin/activate
 
-# 安装依赖
-pip install modelscope torch torchaudio soundfile pyyaml psutil
+# 安装 qwen-asr（官方包）
+pip install -U qwen-asr
+
+# 下载模型
+modelscope download --model Qwen/Qwen3-ASR-1.7B --local_dir ./Qwen3-ASR-1.7B
 ```
 
 ### 2. 运行环境检查
@@ -58,6 +61,9 @@ python scripts/extract_transcript.py "/path/to/your/video.mp4"
   - **Qwen3-ASR-0.6B**：轻量级模型，约 1.2GB，适合低配设备
 - **环境变量**（可选）：
   ```bash
+  # 指定本地模型路径（推荐）
+  export QWEN_ASR_MODEL_PATH=./Qwen3-ASR-1.7B
+  # 或使用 ModelScope 模型名
   export QWEN_ASR_MODEL=Qwen/Qwen3-ASR-1.7B
   export QWEN_ASR_DEVICE=cuda  # 或 cpu/mps
   ```

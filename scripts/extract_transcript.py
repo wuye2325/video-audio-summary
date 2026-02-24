@@ -4,9 +4,12 @@
 用法: python extract_transcript.py <视频/音频文件路径> [输出目录]
 
 环境变量（可选）：
-- MODELSCOPE_CACHE: ModelScope 模型缓存目录
-- QWEN_ASR_MODEL: 强制指定模型（Qwen/Qwen3-ASR-1.7B 或 Qwen/Qwen3-ASR-0.6B）
+- QWEN_ASR_MODEL_PATH: 本地模型路径（优先级最高）
+- QWEN_ASR_MODEL: ModelScope 模型名（Qwen/Qwen3-ASR-1.7B 或 Qwen/Qwen3-ASR-0.6B）
 - QWEN_ASR_DEVICE: 强制指定设备（cpu/cuda/mps）
+
+使用前请先下载模型：
+modelscope download --model Qwen/Qwen3-ASR-1.7B --local_dir ./Qwen3-ASR-1.7B
 """
 import sys
 import os
@@ -96,12 +99,24 @@ def extract_transcript(media_path: str, output_dir: str = None) -> str:
     # 硬件检测与自动配置优化
     # ========================================
 
-    # 检查是否有环境变量强制指定配置
+    # 优先检查本地模型路径
+    local_model_path = os.environ.get("QWEN_ASR_MODEL_PATH")
     env_model = os.environ.get("QWEN_ASR_MODEL")
     env_device = os.environ.get("QWEN_ASR_DEVICE")
 
-    if env_model or env_device:
-        # 用户手动指定了配置，跳过自动检测
+    # 确定使用的模型
+    if local_model_path and Path(local_model_path).exists():
+        # 使用本地模型
+        model = local_model_path
+        device = env_device or "cpu"
+        print("=" * 60)
+        print("使用本地模型")
+        print("=" * 60)
+        print(f"模型路径: {model}")
+        print(f"设备: {device}")
+        print("=" * 60 + "\n")
+    elif env_model or env_device:
+        # 用户手动指定了 ModelScope 模型名
         model = env_model or "Qwen/Qwen3-ASR-1.7B"
         device = env_device or "cpu"
         print("=" * 60)

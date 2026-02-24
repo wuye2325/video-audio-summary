@@ -52,16 +52,30 @@ ffmpeg -i "<文件路径>" 2>&1 | grep -E "Duration|Audio|Video"
 **环境要求：**
 - Python 3.8+
 - ffmpeg（视频处理必需）
-- modelscope、torch、torchaudio、soundfile
+- qwen-asr 包
 
 **⚠️ 重要：模型下载**
 
-首次运行时需要下载 Qwen3-ASR 模型：
+首次使用前需要下载 Qwen3-ASR 模型（推荐使用 ModelScope）：
+
+```bash
+# 安装 qwen-asr 包
+pip install -U qwen-asr
+
+# 下载模型到本地（推荐 1.7B 模型）
+modelscope download --model Qwen/Qwen3-ASR-1.7B --local_dir ./Qwen3-ASR-1.7B
+
+# 或者下载轻量级 0.6B 模型（适合低配设备）
+modelscope download --model Qwen/Qwen3-ASR-0.6B --local_dir ./Qwen3-ASR-0.6B
+```
+
+**模型大小：**
 - **Qwen3-ASR-1.7B**：约 3.5GB，高精度，推荐使用
 - **Qwen3-ASR-0.6B**：约 1.2GB，轻量级，适合低配设备
 
 **模型缓存位置：**
-- 默认路径：`~/.cache/modelscope/hub/`
+- ModelScope 默认：`~/.cache/modelscope/hub/`
+- 手动下载：指定的 `--local_dir` 目录
 
 **环境检查脚本位置：**
 ```
@@ -85,19 +99,24 @@ ffmpeg -version
 ls -la ~/Downloads/qwen-asr-env/
 ```
 
-4. 检查 modelscope：
+4. 检查 qwen-asr：
 ```bash
 source ~/Downloads/qwen-asr-env/bin/activate
-pip show modelscope
+pip show qwen-asr
 ```
 
 **环境准备（如未完成）：**
 
 ```bash
-# 1. 创建虚拟环境并安装依赖
+# 1. 创建虚拟环境
 python3 -m venv ~/Downloads/qwen-asr-env
 source ~/Downloads/qwen-asr-env/bin/activate
-pip install -i https://pypi.tuna.tsinghua.edu.cn/simple modelscope torch torchaudio soundfile pyyaml psutil
+
+# 2. 安装 qwen-asr（官方包，自动安装依赖）
+pip install -U qwen-asr
+
+# 3. 下载模型
+modelscope download --model Qwen/Qwen3-ASR-1.7B --local_dir ./Qwen3-ASR-1.7B
 ```
 
 ---

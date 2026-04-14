@@ -1,516 +1,369 @@
 ---
 name: video-audio-summary
-description: 本地视频/音频语音转文字与结构化总结。当用户需要提取本地视频/音频文件的逐字稿，或对长音频/视频内容进行结构化总结时使用此技能。使用 Qwen3-ASR 进行本地语音识别，数据完全本地处理，无需云端服务。支持高精度中文识别、自动标点还原和中英混合识别。
+description: "满分会议纪要系统。会议录音 → 结构化纪要 + 历史对比洞察。支持 Qwen3-ASR 本地高精度转写、本地替代说话人分离（不依赖 HF gated 模型）、声纹实名匹配、按议题分段、原话引用提取、历史会议对比分析。"
+version: 3.0.0
+tags:
+  - meeting
+  - asr
+  - speaker-diarization
+  - voiceprint
+  - summary
+  - transcription
+  - qwen-asr
+  - local-diarization
+  - historical-insights
 ---
 
-# 视频/音频本地总结
+# 满分会议纪要系统
 
-## 概述
+把会议录音处理成**逐字稿 + raw 结构化数据**，再由 Agent 生成可交付会议纪要，并可自动关联历史会议给出洞察。
 
-此技能提供完整的本地视频/音频处理工作流：从语音转文字（ASR）到结构化内容总结。使用 Qwen3-ASR 进行本地语音识别，确保数据隐私安全。
+**触发条件**：用户发送录音文件（mp3/wav/ogg/opus/m4a/flac）、说"总结会议/会议纪要/帮我总结录音"、说"注册声纹/记住我的声音"、要求"对比上次会议"、"看看有什么新进展"。
 
-**核心优势：**
-- **SOTA 级别中文识别精度**：Qwen3-ASR 在中文语音识别上表现优异
-- **自动标点还原**：无需后处理，直接输出带标点的文本
-- **超快处理速度**：相比 Whisper，吞吐量提升约 2000 倍
-- **中英混合支持**：自动识别语言切换，无缝处理混合内容
-- **方言支持**：对多种中文方言有更好的识别效果
-- **官方 qwen-asr 包**：使用官方封装的 API，简单易用
-
-**使用场景：**
-- 提取本地视频/音频的逐字稿
-- 对会议录音、访谈、直播等内容进行结构化总结
-- 需要数据本地处理，不使用云端服务的场景
-
----
-
-## 工作流程
-
-### 步骤 1：明确要处理的文件
-
-首先确认用户提供的文件路径和类型。
-
-**支持格式：**
-- 视频：MP4, MOV, AVI, MKV, FLV, WMV
-- 音频：MP3, WAV, M4A, FLAC, AAC, OGG
-
-**确认文件存在：**
-```bash
-ls -la "<文件路径>"
-```
-
-**获取文件基本信息：**
-```bash
-ffmpeg -i "<文件路径>" 2>&1 | grep -E "Duration|Audio|Video"
-```
+**依赖**：ffmpeg、Python 3.9+、Qwen3-ASR 模型（~3.5GB）。说话人分离使用本地替代方案，不依赖 HuggingFace gated 权限。
 
 ---
 
-### 步骤 2：检查并准备环境
+## 核心特性
 
-检查系统环境是否满足要求。
+| 特性 | 说明 |
+|------|------|
+| **Qwen3-ASR 本地转写** | SOTA 级中文识别，自动标点，中英混合支持，数据完全本地 |
+| **本地说话人分离（替代）** | 基于 energy+cluster 的本地多说话人分段，不依赖 gated 模型 |
+| **声纹实名匹配** | 注册声纹后自动识别说话人身份 |
+| **按议题分段** | LLM 智能识别议题边界，生成结构化讨论段落 |
+| **原话引用提取** | 自动识别关键决策、承诺、争议点的原文摘录 |
+| **历史对比洞察** | 与历史会议对比，识别延续话题、新进展、待办闭环 |
 
-**环境要求：**
-- Python 3.8+（推荐 3.12）
-- ffmpeg（视频处理必需）
-- qwen-asr 包
+---
 
-**⚠️ 重要：环境准备**
+## 路由与执行方式
 
-#### Mac 用户（推荐使用 Conda）
+- **模型**：优先使用高推理模型处理纪要生成与质量检查
+- **执行方式**：默认在当前会话直接执行；仅当用户明确要求并行/委派时才使用 subagent
+- **最小输入**：音频路径 + 输出路径（历史洞察和 speaker map 为可选）
 
-```bash
-# 创建并激活环境
-conda create -n qwen3-asr python=3.12 -y
-conda activate qwen3-asr
+---
 
-# 安装 qwen-asr（官方包，自动安装所需依赖）
-pip install -U qwen-asr
+## ⚡ 快速参考：两种使用方式
 
-# 模型会在首次使用时自动下载，也可提前下载
-modelscope download --model Qwen/Qwen3-ASR-1.7B --local_dir ./Qwen3-ASR-1.7B
+| 方式 | 场景 | 触发条件 |
+|------|------|----------|
+| **完整流程** | 从音频开始，需要转写 | 用户发送音频文件或说"总结会议/会议纪要" |
+| **仅生成纪要** | 已有逐字稿，只需总结 | 用户说"已有逐字稿"、"直接总结"并附带文本，或使用 `--from-transcript` |
+
+### 完整流程（从音频开始）
+
+```
+步骤 0：确认输入参数（音频路径、输出目录）
+步骤 1：初始化与环境检查
+步骤 2：跑主脚本（产出逐字稿 + raw）
+步骤 3：检查输出 + 质量闸门
+步骤 4：说话人确认 → 替换逐字稿人名
+步骤 5：Agent 生成会议纪要
 ```
 
-#### Linux/Windows 用户
+### 仅生成纪要（已有逐字稿）
 
-```bash
-# 创建虚拟环境
-python3 -m venv qwen3-asr-env
-source qwen3-asr-env/bin/activate  # Linux/Mac
-# 或
-qwen3-asr-env\Scripts\activate  # Windows
-
-# 安装 qwen-asr
-pip install -U qwen-asr
 ```
-
-**模型大小：**
-- **Qwen3-ASR-1.7B**：约 3.5GB，高精度，推荐使用
-- **Qwen3-ASR-0.6B**：约 1.2GB，轻量级，适合低配设备
-
-**模型缓存位置：**
-- ModelScope 默认：`~/.cache/modelscope/hub/`
-- 手动下载：指定的 `--local_dir` 目录
-
-**环境检查脚本位置：**
-```
-scripts/check_environment.sh
-```
-
-**手动检查命令：**
-
-1. 检查 Python：
-```bash
-python3 --version
-```
-
-2. 检查 ffmpeg：
-```bash
-ffmpeg -version
-```
-
-3. 检查 qwen-asr：
-```bash
-pip show qwen-asr
+步骤 1：读取用户提供的逐字稿
+步骤 2：询问说话人身份（若有 SPEAKER_XX 等代号）
+步骤 3：替换人名或根据上下文推测角色
+步骤 4：Agent 生成会议纪要
 ```
 
 ---
 
-### 步骤 3：提取逐字稿
+### 完整流程详细步骤
 
-使用 Qwen3-ASR 提取语音转文字。
-
-**脚本位置：**
-```
-scripts/extract_transcript.py
-```
-
-**使用方法：**
-```bash
-# 激活环境
-conda activate qwen3-asr  # Mac
-# 或
-source qwen3-asr-env/bin/activate  # Linux
-
-# 提取逐字稿（脚本会自动选择最优配置）
-python scripts/extract_transcript.py "<视频/音频文件路径>" [输出目录]
-```
-
-**参数说明：**
-- 第一个参数：视频/音频文件的完整路径
-- 第二个参数（可选）：输出目录，默认为文件所在目录
-
-**输出文件：**
-- 文件名：`{原文件名}_逐字稿.md`
-- 内容结构：
-  - 文件元信息（文件名、模型、设备、识别语言）
-  - 完整逐字稿（带时间戳，如有）
-  - 自动标点还原
-
-**模型选择与设备优化（自动检测）：**
-
-脚本会自动检测硬件并选择最优配置：
-
-| 硬件配置 | 推荐模型 | 设备 | 数据类型 | 预期加速 |
-|---------|---------|------|----------|----------|
-| NVIDIA GPU (显存 ≥ 8GB) | Qwen3-ASR-1.7B | cuda | bfloat16 | 10-20x |
-| Apple Silicon (M1/M2/M3/M5) | Qwen3-ASR-1.7B | mps | bfloat16 | 3-5x |
-| 高配 CPU (16GB+ RAM, 8+ 核) | Qwen3-ASR-1.7B | cpu | float32 | 1.5-2x |
-| 标准 CPU (8GB+ RAM) | Qwen3-ASR-1.7B | cpu | float32 | 1.5x |
-| 低配 CPU | Qwen3-ASR-0.6B | cpu | float32 | 基准 |
-
-**手动指定配置（可选）：**
-```bash
-# 强制指定模型
-export QWEN_ASR_MODEL=Qwen/Qwen3-ASR-1.7B  # 或 Qwen/Qwen3-ASR-0.6B
-
-# 强制指定设备
-export QWEN_ASR_DEVICE=cuda  # 或 cpu/mps
-
-# 强制指定数据类型
-export QWEN_ASR_DTYPE=float16  # 或 bfloat16/float32
-
-# 指定本地模型路径（优先级最高）
-export QWEN_ASR_MODEL_PATH=/path/to/local/model
-
-# 调整每块处理时长（秒），默认 60 秒/块，值越小进度更新越频繁
-export QWEN_ASR_CHUNK_SECONDS=30
-
-python scripts/extract_transcript.py "video.mp4"
-```
-
-**预期处理时间：**
-- NVIDIA GPU：约 1 小时音频 → 1-3 分钟
-- Apple Silicon (MPS)：约 1 小时音频 → 10-15 分钟
-- Apple Silicon (CPU)：约 1 小时音频 → 20-30 分钟
-- 高配 CPU：约 1 小时音频 → 30-40 分钟
-
----
-
-### 步骤 4：结构化总结
-
-对逐字稿进行结构化分析和总结。
-
-**当逐字稿文件较大（>20000 tokens）时：**
-
-使用 general-purpose agent 进行分析：
-```
-请分析文件 `<逐字稿文件路径>`，这是关于"<主题>"的对话/演讲逐字稿。
-
-请完成以下任务：
-1. 识别参与者/演讲者
-2. 提取核心主题（3-6个）
-3. 结构化总结：
-   - 概述（时间、参与者、主题）
-   - 主要讨论内容（分主题）
-   - 核心观点和见解
-   - 实践建议或操作方法
-   - 关键金句
-
-将总结保存为 Markdown 文件到 `<输出文件路径>`
-```
-
-**当逐字稿较小时：**
-
-直接分析文件内容并生成结构化总结，包含以下部分：
-
-1. **概述**
-   - 文件信息
-   - 参与者/演讲者
-   - 时长/字数
-
-2. **核心主题**（3-6个）
-   - 主题标题
-   - 详细内容说明
-
-3. **核心观点**
-   - 按参与者/演讲者分类
-   - 列出主要观点
-
-4. **实践建议**
-   - 可操作的具体建议
-   - 实施方法
-
-5. **关键金句**
-   - 摘录 10-30 条精彩观点
-   - 保留原始表述
-
-6. **总结与展望**
-   - 主要共识
-   - 行动计划
-   - 应用场景
-
-**输出文件：**
-- 文件名：`{原文件名}_结构化总结.md`
-
----
-
-## 资源说明
-
-### scripts/
-
-**extract_transcript.py** - 逐字稿提取脚本
-- 功能：使用 Qwen3-ASR 将视频/音频转为带时间戳的逐字稿
-- 输入：视频/音频文件路径
-- 输出：Markdown 格式的逐字稿文件
-- 依赖：qwen-asr（自动安装 torch, torchaudio 等）
-- 特性：
-  - 自动检测硬件配置并选择最优模型和设备
-  - **实时进度显示**：将音频切分为固定时长的块（默认 60s）逐块转录，每块完成后显示进度条、转录速度和预计剩余时间
-  - 支持通过 `QWEN_ASR_CHUNK_SECONDS` 环境变量调整块大小
-
-**detect_hardware.py** - 硬件检测模块
-- 功能：自动检测 CPU、GPU、内存等硬件信息
-- 支持平台：Windows、macOS、Linux
-- 检测内容：
-  - 操作系统和架构
-  - CPU 核心数和类型
-  - 系统内存大小
-  - GPU 信息（NVIDIA、AMD、Apple Silicon）
-- 推荐配置：
-  - 最优模型（1.7B / 0.6B）
-  - 最优设备类型（cpu/cuda/mps）
-  - 最优数据类型（float16/float32）
-
-**check_environment.sh** - 环境检查脚本
-- 功能：检查并准备运行环境
-- 检查项：Python, pip, ffmpeg, 虚拟环境, qwen-asr
-- 自动创建虚拟环境和安装依赖
-
-### references/
-
-此技能当前不需要额外参考文档。
-
-### assets/
-
-此技能当前不需要额外资源文件。
-
----
-
-## 常见问题
-
-**Q: 脚本会自动选择最优配置吗？**
-A: 是的！脚本会自动检测您的硬件配置（CPU、GPU、内存）并选择最优方案：
-- **NVIDIA GPU** → 使用 Qwen3-ASR-1.7B + CUDA（最快）
-- **Apple Silicon** → 使用 Qwen3-ASR-1.7B + MPS（比 CPU 快 3-5 倍）
-- **高配 CPU** → 使用 Qwen3-ASR-1.7B + CPU
-- **标准/低配 CPU** → 使用 Qwen3-ASR-0.6B + CPU
-
-**Q: 如何手动指定模型或设备？**
-A: 使用环境变量覆盖自动检测：
-```bash
-export QWEN_ASR_MODEL=Qwen/Qwen3-ASR-1.7B
-export QWEN_ASR_DEVICE=cuda  # 或 cpu/mps
-export QWEN_ASR_DTYPE=float16  # 或 bfloat16/float32
-python scripts/extract_transcript.py "video.mp4"
-```
-
-**Q: pip 安装时网络超时（ReadTimeoutError）怎么办？**
-A: `torch` 包体积约 80-500MB，直连 PyPI 官方源在国内经常超时。按以下顺序尝试镜像：
+### 步骤 1：初始化与环境检查（首次安装）
 
 ```bash
-# 方案1：使用 check_environment.sh（已内置阿里云镜像，默认推荐）
+# 在 skill 目录执行（只需首次）
+cd {baseDir}
 bash scripts/check_environment.sh
-
-# 方案2：手动指定镜像安装（阿里云最稳定）
-pip install torch torchaudio -i https://mirrors.aliyun.com/pypi/simple/ --timeout 300
-pip install qwen-asr -i https://mirrors.aliyun.com/pypi/simple/ --timeout 300
-
-# 方案3：切换到其他镜像
-PIP_MIRROR=https://pypi.tuna.tsinghua.edu.cn/simple  # 清华
-PIP_MIRROR=https://mirrors.cloud.tencent.com/pypi/simple  # 腾讯云
 ```
 
-> **关键经验**：先单独安装 `torch torchaudio`（大包），再安装 `qwen-asr`（小包），比一次性安装超时风险更低。
+可选环境变量：
+- `QWEN_ASR_PYTHON`：指定带 `qwen_asr` 依赖的 Python（如 `~/qwen3-asr-env/bin/python`）
+- `QWEN_ASR_VENV`：指定虚拟环境目录（脚本自动使用 `${QWEN_ASR_VENV}/bin/python`）
+- `QWEN_ASR_MODEL_PATH`：指定本地模型目录（含 `config.json`）
+- `QWEN_ASR_MODEL`：远端模型名（未设置本地路径时可用）
 
-**Q: 加载模型时出现 SSL 证书错误（certificate verify failed / self-signed certificate）怎么办？**
-A: 这是企业/学校网络代理（如深信服、Zscaler）用自签名证书拦截 HTTPS 流量导致的，Python certifi 不信任该证书。
+### 步骤 1.5：运行前快速检查
 
 ```bash
-# 方案：将 macOS Keychain 系统证书合并到 Python certifi（一次性操作）
-CERTIFI=$(python3 -c "import certifi; print(certifi.where())")
-cp "$CERTIFI" "${CERTIFI}.bak"  # 先备份
-security export -t certs -f pemseq -k /Library/Keychains/System.keychain >> "$CERTIFI" 2>/dev/null
-security export -t certs -f pemseq -k ~/Library/Keychains/login.keychain-db >> "$CERTIFI" 2>/dev/null
-echo "已合并证书数: $(grep -c 'BEGIN CERTIFICATE' $CERTIFI)"
+# 检查 ffmpeg
+which ffmpeg
+
+# 检查 Qwen3-ASR Python（任选其一）
+test -x "${QWEN_ASR_PYTHON:-}" && echo "QWEN_ASR_PYTHON就绪" || echo "QWEN_ASR_PYTHON未设置（将自动探测）"
+test -x "${QWEN_ASR_VENV:-}/bin/python" && echo "QWEN_ASR_VENV就绪" || echo "QWEN_ASR_VENV未设置（将自动探测）"
+
+# 检查本地模型（可选；也可只设 QWEN_ASR_MODEL）
+test -f "${QWEN_ASR_MODEL_PATH:-}/config.json" && echo "本地模型就绪" || echo "本地模型未设置（将自动探测或走 QWEN_ASR_MODEL）"
+
+# 说话人分离无需 pyannote/HF 权限（本地替代方案）
+echo "local diarization ready"
 ```
 
-> **已集成到 `check_environment.sh` 步骤 7**，会自动检测并修复。修复后 Python 的所有网络请求（requests/urllib3）均自动信任代理证书。
+**禁止事项**：
+- ❌ 不要在未确认前改动生产环境配置
+- ❌ 不要把失败结果当成功交付
 
-**Q: 如何下载 Qwen3-ASR-1.7B 模型？（国内网络推荐方案）**
-A: 直接访问 HuggingFace 或 ModelScope 可能遇到 SSL 错误或超时。经验证的最快方案：
+### 步骤 2：跑主脚本
 
 ```bash
-# 使用 hf-mirror.com 镜像 + huggingface_hub Python API
-source ~/qwen3-asr-env/bin/activate
-python3 -c "
-import os
-os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'
-from huggingface_hub import snapshot_download
-snapshot_download('Qwen/Qwen3-ASR-1.7B', local_dir=os.path.expanduser('~/Qwen3-ASR-1.7B'))
-print('下载完成')
-"
-# 下载完成后设置环境变量，脚本优先使用本地模型
-export QWEN_ASR_MODEL_PATH=~/Qwen3-ASR-1.7B
+cd {baseDir} && \
+PYTHONUNBUFFERED=1 \
+python scripts/meeting-summarize-v2.py \
+  --audio "/path/to/recording.m4a" \
+  --transcript-out "/path/to/transcript.md" \
+  --raw-out "/path/to/transcript.raw.json"
 ```
 
-> ⚠️ **为什么不用 `modelscope` CLI？** `modelscope` CLI 在 Python 3.12 下存在 `No module named 'pkg_resources'` 兼容问题（Python 3.12 移除了该内置模块），`setuptools` 修复无效。直接用 `huggingface_hub` API 更可靠，且同样走国内 hf-mirror.com 镜像。
->
-> 已集成到 `check_environment.sh` 步骤 8，**会自动下载模型**。
+**可选参数**：
+- `--num-speakers N`：已知参会人数
+- `--speaker-map /path/to/map.json`：已知人名映射
+- `--with-history-insight`：启用历史对比洞察
+- `--history-meeting-date YYYY-MM-DD`：指定对比的历史会议日期
 
+### 步骤 3：检查输出
 
-
-**Q: 处理速度还是很慢怎么办？**
-A:
-1. 检查是否有 NVIDIA GPU（安装 CUDA Toolkit）
-2. 如果是 Apple Silicon，确保使用最新版本的 qwen-asr（支持 MPS）
-3. 考虑使用 0.6B 模型：`export QWEN_ASR_MODEL=Qwen/Qwen3-ASR-0.6B`
-
-**Q: 中文识别效果不好？**
-A:
-- Qwen3-ASR 针对中文优化，识别效果通常优于 Whisper
-- 确保音频质量清晰
-- 模型已自动处理标点还原，无需额外配置
-
-**Q: 视频文件太大怎么办？**
-A: 可以先用 ffmpeg 提取音频：
 ```bash
-ffmpeg -i input.mp4 -vn -acodec copy output.m4a
+# 检查生成的逐字稿（独立文件）
+head -120 /path/to/transcript.md
+
+# 检查 raw 文件（供 Agent 生成会议纪要）
+python3 -m json.tool /path/to/transcript.raw.json | head -120
 ```
 
-**Q: 如何查看我的硬件检测结果？**
-A: 运行硬件检测脚本：
+### 步骤 3.5：质量闸门（必须通过）
+
+只要出现以下任一情况，视为失败，不可进入步骤 5：
+- 日志出现“转写完成，共 0 段”
+- `transcript.md` 为空或仅有标题
+- `transcript.raw.json` 缺失 `segments/topics/actions`
+- 说话人分离失败且结果退化为全 `Unknown`
+
 ```bash
-python scripts/detect_hardware.py
+# 1) 快速扫描失败信号（以 run.log 为例）
+rg -n "转写完成，共 0 段|说话人分离失败|错误|Traceback" /tmp/run.log
+
+# 2) 逐字稿必须有正文
+wc -l /path/to/transcript.md
+sed -n '1,80p' /path/to/transcript.md
+
+# 3) raw 必须有关键字段
+python3 - <<'PY'
+import json
+p="/path/to/transcript.raw.json"
+d=json.load(open(p,"r",encoding="utf-8"))
+for k in ("segments","topics","actions"):
+    v=d.get(k)
+    print(f"{k}: {'OK' if isinstance(v,list) else 'MISSING'} len={len(v) if isinstance(v,list) else 'n/a'}")
+PY
 ```
 
-**Q: Qwen3-ASR 有什么优势？**
-A: 相比 Whisper：
-- **中文精度更高**：专门针对中文优化
-- **自动标点还原**：输出结果直接带标点
-- **速度更快**：吞吐量提升约 2000 倍
-- **中英混合**：自动识别语言切换
-- **方言支持**：对多种中文方言支持更好
-- **官方封装**：提供简单易用的 `qwen-asr` 包
+失败处理原则：
+1. 不做规则版降级纪要。
+2. 直接定位根因并修复后重跑（环境、模型、音频质量、解析逻辑）。
+3. 仅在质量闸门通过后，Agent 才进入步骤 5 生成会议纪要。
+
+### 步骤 4：说话人确认 → 替换逐字稿人名
+
+**规则**：如果检测到 ≥2 个有效说话人，必须先问用户确认身份，**然后替换逐字稿中的代号**。
+
+**询问模板**：
+```
+检测到 X 位说话人：
+- SPEAKER_01（YY 段发言）
+- SPEAKER_02（ZZ 段发言）
+
+请告诉我每位说话人对应谁？（如：SPEAKER_01 是莆主任，SPEAKER_02 是吴晔）
+若不确定或不想提供，可直接回复"不确定"，Agent 将根据上下文语义推测。
+```
+
+**两种处理路径**：
+
+| 用户响应 | 处理方式 |
+|----------|----------|
+| 提供姓名映射 | 替换逐字稿中的 `SPEAKER_XX` → 真实姓名 |
+| 不提供/回复"不确定" | 保留代号，Agent 在生成纪要时根据上下文语义推测角色（如"业委会主任"、"产品经理"等）
+
+**用户确认后，执行替换**：
+
+用 Edit 工具批量替换逐字稿中的说话人代号：
+- `SPEAKER_01` → `莆主任`
+- `SPEAKER_02` → `吴晔`
+- `Unknown` → 保持不变或根据上下文推断
+
+**示例命令**：
+```bash
+# 使用 sed 批量替换（若逐字稿在 output 目录）
+sed -i '' 's/SPEAKER_01/莆主任/g' output/逐字稿.md
+sed -i '' 's/SPEAKER_02/吴晔/g' output/逐字稿.md
+```
+
+**重要**：替换完成后，**必须重新读取逐字稿**，确认人名已正确替换，然后才进入步骤 5。
+
+**用户不提供姓名时的降级方案**：
+
+若用户回复"不确定"或不提供，Agent 在生成纪要时根据上下文语义推测：
+- 提取每位说话人的发言内容关键词
+- 根据自称、称呼、话题判断角色（如"我作为业委会主任"、"李经理"等）
+- 在纪要中使用推测的角色名（如"业委会代表"、"技术方"），而非 SPEAKER_XX 代号
+
+**推测示例**：
+```
+SPEAKER_01 说："我们对物业的考核机制还在完善..."
+→ 推测为：业委会代表 / 甲方代表
+
+SPEAKER_02 说："我们做大模型的成本..."
+→ 推测为：技术方 / 产品经理
+```
+
+### 步骤 5：交付纪要（Agent 生成）
+
+**前提**：逐字稿中说话人代号已完成姓名替换。
+
+会议纪要由 Agent 基于**替换后的逐字稿** + raw.json 生成。
+
+**输出格式**：参见 `references/meeting-template.md`
+
+核心结构：
+- 参会人员表（用户确认后的说话人身份）
+- 议题分段（智能合并相关段落）
+- 每议题配原话摘录（防幻觉）
+- 行动项表 + 风险事项
 
 ---
 
-## 快速开始示例
+## 历史对比洞察
 
-### Mac (M1/M2/M3/M5) 用户
+当使用 `--with-history-insight` 时，系统会：
+
+1. **扫描历史会议**：读取 `~/memory/meeting/` 目录下的所有会议纪要
+2. **建立索引**：使用 `meeting-indexer.py` 构建可检索的会议数据库
+3. **智能关联**：基于议题相似度、参与人员、关键词匹配关联相关历史会议
+4. **生成洞察**：
+   - **延续话题**：识别与历史会议相同议题的新进展
+   - **决策变更**：检测与历史决定不一致的新决策
+   - **待办闭环**：检查上次会议 action items 的完成状态
+   - **趋势分析**：识别反复出现的问题或模式
+
+---
+
+## 仅生成纪要流程（已有逐字稿）
+
+**适用场景**：用户已通过其他录音软件生成逐字稿，只想用本技能生成会议纪要。
+
+### 步骤 1：读取逐字稿
 
 ```bash
-# 1. 创建环境
-conda create -n qwen3-asr python=3.12 -y
-conda activate qwen3-asr
-
-# 2. 安装 qwen-asr
-pip install -U qwen-asr
-
-# 3. （可选）检测硬件并查看推荐配置
-python scripts/detect_hardware.py
-
-# 4. 提取逐字稿（脚本会自动选择 MPS 加速）
-python scripts/extract_transcript.py "/path/to/video.mp4"
-
-# 5. 查看逐字稿
-open "/path/to/video_逐字稿.md"
+# 用户直接提供逐字稿路径
+--from-transcript /path/to/transcript.md
 ```
 
-### Linux/Windows 用户
+Agent 使用 Read 工具读取逐字稿内容。
 
-```bash
-# 1. 创建虚拟环境
-python3 -m venv qwen3-asr-env
-source qwen3-asr-env/bin/activate  # Linux
-# 或 qwen3-asr-env\Scripts\activate  # Windows
+### 步骤 2：识别说话人代号
 
-# 2. 安装 qwen-asr
-pip install -U qwen-asr
+扫描逐字稿，识别是否有 SPEAKER_XX、Speaker_A 等代号：
+- 若有 → 询问用户身份映射
+- 若无（已有真实姓名）→ 直接进入步骤 4
 
-# 3. 提取逐字稿
-python scripts/extract_transcript.py "/path/to/video.mp4"
+### 步骤 3：替换人名或推测角色
+
+**用户提供姓名** → 批量替换：
+```
+SPEAKER_01 → 莆主任
+SPEAKER_02 → 吴晔
 ```
 
-**高级用法**：手动指定配置
+**用户不提供** → 根据上下文推测角色（见步骤 4 详细说明）。
+
+### 步骤 4：生成会议纪要
+
+基于逐字稿内容，按方法论标准生成纪要。
+
+---
+
+## 纪要质量标准（方法论对照）
+
+本技能按"满分会议纪要方法论"生成纪要：
+
+| 分数 | 标准 | 本技能实现 |
+|------|------|------------|
+| 5分 | 基础转写 | ✅ Qwen3-ASR 转写 |
+| 6-7分 | 结构化分段 | ✅ 按议题分段 + 关键结论 |
+| 8分 | 原话节选 | ✅ 每议题配原话摘录（防幻觉） |
+| 9分 | 历史对比 | ✅ `--with-history-insight` 关联往期会议 |
+| 10分 | 未来探索 | ⚠️ 可扩展（语音克隆、知识图谱等） |
+
+**核心理念**：每个重要观点后配原话节选，保留语气语境，确保表达准确。
+
+---
+
+## 声纹管理
+
 ```bash
-# 强制使用特定模型或设备
-export QWEN_ASR_MODEL=Qwen/Qwen3-ASR-1.7B
-export QWEN_ASR_DEVICE=cuda  # 如果有 NVIDIA GPU
-export QWEN_ASR_DTYPE=float16
-python scripts/extract_transcript.py "/path/to/video.mp4"
+# 注册声纹（建议 3-10 秒、清晰、单人语音）
+python scripts/voiceprint-manager.py enroll --name "张三" --audio /path/to/voice.wav
+
+# 识别说话人
+python scripts/voiceprint-manager.py identify --audio /path/to/audio.wav --json
+
+# 查看已注册声纹
+python scripts/voiceprint-manager.py list
+
+# 删除声纹
+python scripts/voiceprint-manager.py delete --name "张三"
 ```
 
 ---
 
-## 环境清理
+## 缓存机制
 
-如果之前使用过 faster-whisper，可以清理旧环境释放空间：
+缓存目录：`~/.openclaw/workspace/cache/video-audio-summary/`
 
-```bash
-# 删除旧的虚拟环境
-rm -rf ~/Downloads/whisper-env
+- **ASR 缓存**：`<音频哈希>_asr.json`
+- **说话人分离缓存**：`<音频哈希>_diarization.json`
 
-# 删除 Hugging Face 缓存的 Whisper 模型（约 1.4GB）
-rm -rf ~/.cache/huggingface/hub/models--Systran--faster-whisper-*
-rm -rf ~/.cache/huggingface/hub/.locks/models--Systran--faster-whisper-*
-```
-
-**总计可释放约 2GB 空间**
+使用原则：
+- 改 speaker-map 时，不重跑 ASR
+- 只补缺失部分，不整场重算
 
 ---
 
-## 官方 qwen-asr API 参考
+## 错误处理决策树
 
-### 快速推理示例
-
-```python
-import torch
-from qwen_asr import Qwen3ASRModel
-
-# 创建模型
-model = Qwen3ASRModel.from_pretrained(
-    "Qwen/Qwen3-ASR-1.7B",
-    dtype=torch.bfloat16,   # 官方推荐 bfloat16，模型权重格式为 BF16
-    device_map="mps",       # Mac 使用 "mps"，NVIDIA 使用 "cuda:0"，CPU 不传此参数
-    max_inference_batch_size=8,
-    max_new_tokens=256,
-)
-
-# 执行识别
-results = model.transcribe(
-    audio="your_audio_file.wav",
-    language=None,  # 自动检测语言
-)
-
-# 获取结果
-print(f"识别语言: {results[0].language}")
-print(f"识别文本: {results[0].text}")
+```
+脚本执行失败？
+├── ffmpeg 不存在 → 告诉用户安装 ffmpeg → 停止
+├── Qwen3-ASR 模型缺失 → 告诉用户下载模型 → 停止
+├── Qwen3-ASR 环境损坏 → 尝试重建环境 → 重试
+├── 本地说话人分离失败 → 先修复根因（音频质量/参数）再重试，不做规则版纪要降级
+├── 转写完成但段数=0 且逐字稿有内容 → 修复解析链路后重跑，不允许直接交付
+└── 其他 Python 错误 → 贴完整 traceback 告诉用户 + 给出下一步修复建议
 ```
 
-### 带时间戳的批量推理
+---
 
-```python
-import torch
-from qwen_asr import Qwen3ASRModel
+## 输出文件规范
 
-model = Qwen3ASRModel.from_pretrained(
-    "Qwen/Qwen3-ASR-1.7B",
-    dtype=torch.bfloat16,
-    device_map="cuda:0",
-    forced_aligner="Qwen/Qwen3-ForcedAligner-0.6B",  # 启用时间戳
-    forced_aligner_kwargs=dict(
-        dtype=torch.bfloat16,
-        device_map="cuda:0",
-    ),
-)
+生成的会议纪要保存到：`~/memory/meeting/YYYY-MM-DD-[主题].md`
 
-results = model.transcribe(
-    audio=["audio1.wav", "audio2.wav"],
-    language=None,
-    return_time_stamps=True,
-)
+文件名规范：
+- 日期前缀：`YYYY-MM-DD-`
+- 主题简述：用 `-` 连接关键词
+- 示例：`2026-04-14-产品2.0架构评审会.md`
 
-for r in results:
-    print(r.language, r.text, r.time_stamps[0])
-```
+---
+
+## 参考文件
+
+- **会议纪要模板**：`references/meeting-template.md`
+- **测试基线记录**：`references/test-baseline.md`
+- **核心脚本**：`scripts/meeting-summarize-v2.py`
+- **历史索引**：`scripts/meeting-indexer.py`
